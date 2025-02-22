@@ -1,68 +1,103 @@
 "use client";
-import React, { useState, useCallback } from "react";
-import { Button } from "@/components/ui/Button";
-import { CheckCircle2, XCircle, AlertCircle, XSquare } from "lucide-react";
+import React, {
+  useCallback,
+  useState,
+  useMemo,
+  useRef,
+  useLayoutEffect,
+  Suspense,
+} from "react";
+import { PopupManager } from "@/lib/PopupManager";
+import {
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  Loader2,
+  XSquare,
+} from "lucide-react";
 import { Spinner } from "@/components/ui/Spinner";
 
 type Status = "idle" | "pending" | "success" | "error" | "cancelled" | "closed";
 
-const ExternalDepositPage: React.FC = () => {
+const DepositPage: React.FC = () => {
+  const popupManager = useMemo(() => PopupManager.getInstance(), []);
   const [status, setStatus] = useState<Status>("idle");
-  const [statusMessage, setStatusMessage] = useState<string>("");
+  const [statusMessage, setStatusMessage] = useState("");
+  const handleIframeMessageRef = useRef<((event: MessageEvent) => void) | null>(
+    null
+  );
 
   const updateStatus = useCallback((newStatus: Status, message: string) => {
     setStatus(newStatus);
     setStatusMessage(message);
   }, []);
 
-  const handleMessage = (event: MessageEvent) => {
-    const { type, data, error } = event.data;
-    switch (type) {
-      case "OTP_VERIFIED":
-        updateStatus("success", data.message || "OTP verified successfully");
-        break;
-      case "OTP_CANCELLED":
-        const isCancelled = data?.message === "Tab closed by user";
-        updateStatus(
-          isCancelled ? "closed" : "cancelled",
-          isCancelled
-            ? "Verification window was closed"
-            : "Verification cancelled"
-        );
-        break;
-      case "OTP_ERROR":
-        updateStatus("error", error || "OTP verification failed");
-        break;
-    }
-  };
+  handleIframeMessageRef.current = useCallback(
+    (event: MessageEvent) => {
+      if (!event.data) return;
 
-  const memoizedHandleMessage = useCallback(handleMessage, [handleMessage]);
+      const { type, url } = event.data;
+      if (type === "OPEN_OTP_POPUP" && url) {
+        setStatus("idle");
+        setStatusMessage("");
 
-  React.useEffect(() => {
-    window.addEventListener("message", memoizedHandleMessage);
-    return () => {
-      window.removeEventListener("message", memoizedHandleMessage);
+        const callbackUrl = `${window.location.origin}/success-callback`;
+        const iframe =
+          document.querySelector<HTMLIFrameElement>("#deposit-iframe");
+
+        updateStatus("pending", "Verification in progress...");
+
+        popupManager.openPopup({
+          targetUrl: url,
+          callbackUrl,
+          onSuccess: (data) => {
+            updateStatus("success", "Verification successful");
+            iframe?.contentWindow?.postMessage(
+              { type: "OTP_VERIFIED", data },
+              "*"
+            );
+          },
+          onCancel: (reason?: string) => {
+            if (reason === "user_cancelled") {
+              updateStatus("cancelled", "Verification cancelled by user");
+              iframe?.contentWindow?.postMessage(
+                { type: "OTP_CANCELLED", data: { message: "User cancelled" } },
+                "*"
+              );
+            } else {
+              updateStatus("closed", "Verification window closed");
+              iframe?.contentWindow?.postMessage(
+                {
+                  type: "OTP_CANCELLED",
+                  data: { message: "Tab closed by user" },
+                },
+                "*"
+              );
+            }
+          },
+          onError: (error) => {
+            updateStatus("error", error.message || "Verification failed");
+            iframe?.contentWindow?.postMessage(
+              { type: "OTP_ERROR", error: error.message },
+              "*"
+            );
+          },
+        });
+      }
+    },
+    [popupManager, updateStatus]
+  );
+
+  useLayoutEffect(() => {
+    const handler = (event: MessageEvent) => {
+      handleIframeMessageRef.current?.(event);
     };
-  }, [memoizedHandleMessage]);
 
-  const handleOpenOtp = () => {
-    updateStatus("pending", "OTP verification in progress...");
-
-    const bankOtpUrl = "/thirdparty-bank";
-
-    try {
-      window.parent.postMessage(
-        {
-          type: "OPEN_OTP_POPUP",
-          url: bankOtpUrl,
-        },
-        "*"
-      );
-    } catch (error) {
-      console.error("Failed to post message:", error);
-      updateStatus("error", "Failed to open OTP verification");
-    }
-  };
+    window.addEventListener("message", handler);
+    return () => {
+      window.removeEventListener("message", handler);
+    };
+  }, []);
 
   const StatusIndicator: React.FC<{ status: Status; message: string }> =
     React.memo(({ status, message }) => {
@@ -79,7 +114,7 @@ const ExternalDepositPage: React.FC = () => {
           case "pending":
             return "bg-blue-100 text-blue-800 border-blue-200";
           default:
-            return "bg-gray-100 text-gray-800 border-gray-200";
+            return "hidden";
         }
       };
 
@@ -94,9 +129,7 @@ const ExternalDepositPage: React.FC = () => {
           case "closed":
             return <XSquare className="w-5 h-5 text-gray-500" />;
           case "pending":
-            return (
-              <Spinner size="sm" className="fill-blue-500 text-blue-100" />
-            );
+            return <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />;
           default:
             return null;
         }
@@ -115,28 +148,26 @@ const ExternalDepositPage: React.FC = () => {
   StatusIndicator.displayName = "StatusIndicator";
 
   return (
-    <main className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-4">
-      <h1 className="text-2xl font-semibold mb-4">
-        External Deposit App IFrame
-      </h1>
-      <p className="mb-4 text-gray-700">
-        This simulates an external deposit page that can request an OTP popup.
-      </p>
-      <Button
-        type="button"
-        onClick={handleOpenOtp}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") handleOpenOtp();
-        }}
-        variant="primary"
-        disabled={status === "pending"}
-        loading={status === "pending"}
-      >
-        {status === "pending" ? "Verifying..." : "Open OTP Popup"}
-      </Button>
-      <StatusIndicator status={status} message={statusMessage} />
-    </main>
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-screen bg-gray-100">
+          <Spinner size="lg" />
+        </div>
+      }
+    >
+      <main className="flex flex-col items-center justify-start min-h-screen bg-gray-100 p-4">
+        <h1 className="text-2xl font-semibold mb-4">Deposit Page</h1>
+        <iframe
+          id="deposit-iframe"
+          src="/external-deposit"
+          title="External Deposit App"
+          className="w-full max-w-3xl h-[400px] border border-gray-300 rounded"
+          tabIndex={0}
+        />
+        <StatusIndicator status={status} message={statusMessage} />
+      </main>
+    </Suspense>
   );
 };
 
-export default ExternalDepositPage;
+export default DepositPage;
