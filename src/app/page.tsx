@@ -159,7 +159,7 @@ const DepositPage: React.FC = () => {
         <h1 className="text-2xl font-semibold mb-4">Deposit Page</h1>
         <iframe
           id="deposit-iframe"
-          src="/external-deposit"
+          src={`${process.env.NEXT_PUBLIC_IFRAME_URL}`}
           title="External Deposit App"
           className="w-full max-w-3xl h-[400px] border border-gray-300 rounded"
           tabIndex={0}
