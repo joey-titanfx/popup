@@ -65,7 +65,8 @@ const DirectPopupPage: React.FC = () => {
               setStatus("error");
               setStatusMessage(data.data?.message || "Verification failed");
             }
-          } catch (error) {
+          } catch (_error) {
+            console.error(_error);
             setStatus("error");
             setStatusMessage("Error handling popup response");
           }
@@ -88,7 +89,8 @@ const DirectPopupPage: React.FC = () => {
           )}`;
           popupRef.current.location.href = targetUrl;
         }
-      } catch (error) {
+      } catch (_error) {
+        console.error(_error);
         clearInterval(checkClosedIntervalRef.current!);
         checkClosedIntervalRef.current = null;
         setStatus("error");
@@ -215,7 +217,7 @@ const DirectPopupPage: React.FC = () => {
 
       <p className="mt-8 text-sm text-gray-500 max-w-md text-center">
         Note: This approach still requires user interaction to prevent popup
-        blocking, but doesn't rely on parent window coordination.
+        blocking, but doesnt rely on parent window coordination.
       </p>
     </main>
   );
